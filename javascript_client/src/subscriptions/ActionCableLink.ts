@@ -10,15 +10,22 @@ class ActionCableLink extends ApolloLink {
   channelName: string
   actionName: string
   connectionParams: ConnectionParams
+  onConnected?: (reconnected: boolean) => void
+  onDisconnected?: () => void
+
+  private reconnecting = false
 
   constructor(options: {
-    cable: Consumer, channelName?: string, actionName?: string, connectionParams?: ConnectionParams
+    cable: Consumer, channelName?: string, actionName?: string, connectionParams?: ConnectionParams,
+    onConnected?: (reconnected: boolean) => void, onDisconnected?: () => void
   }) {
     super()
     this.cable = options.cable
     this.channelName = options.channelName || "GraphqlChannel"
     this.actionName = options.actionName || "execute"
     this.connectionParams = options.connectionParams || {}
+    this.onConnected = options.onConnected
+    this.onDisconnected = options.onDisconnected
   }
 
   // Interestingly, this link does _not_ call through to `next` because
@@ -29,11 +36,20 @@ class ActionCableLink extends ApolloLink {
       var actionName = this.actionName
       var connectionParams = (typeof this.connectionParams === "function") ?
         this.connectionParams(operation) : this.connectionParams
+      var self = this
       var channel = this.cable.subscriptions.create(Object.assign({},{
         channel: this.channelName,
         channelId: channelId
       }, connectionParams), {
-        connected: function() {
+        disconnected: function () {
+          self.onDisconnected?.()
+          self.reconnecting = true
+        },
+        connected: function () {
+          if (self.onConnected) {
+            self.onConnected(self.reconnecting)
+          }
+          self.reconnecting = false
           this.perform(
             actionName,
             {
